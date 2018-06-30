@@ -31,3 +31,13 @@
 # Debug files
 *.dSYM/
 *.su
+
+# Additional output files
+.*.ko.cmd
+.*.o.cmd
+.deps/
+.tmp_versions/
+Module.symvers
+*.mod.c
+modules.order
+
