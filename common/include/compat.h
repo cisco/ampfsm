@@ -15,6 +15,7 @@
 #include <linux/inet.h>
 #include <linux/version.h>
 #include <net/genetlink.h>
+#include <linux/sched.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #   define HAVE_SCHED_MM_H
@@ -226,6 +227,28 @@ done:
 #else
 #   define GENLMSG_PUT(skb, portid, seq, family, flags, cmd) \
         genlmsg_put(skb, portid, seq, (family)->id, (family)->hdrsize, flags, cmd, (family)->version)
+#endif
+
+/* task_ppid_nr
+ *
+ * Kernel 3.12.21+ and RHEL 7.0+: task_ppid_nr is present
+ * Older kernels: not present - pull inline function from upstream
+ */
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(3,12,20) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,0)
+static inline pid_t __task_ppid_nr(struct task_struct *tsk)
+{
+        pid_t pid = 0;
+
+        rcu_read_lock();
+        if (pid_alive(tsk))
+                pid = task_tgid_nr(rcu_dereference(tsk->real_parent));
+        rcu_read_unlock();
+
+        return pid;
+}
+#define TASK_PPID_NR(tsk) __task_ppid_nr(tsk)
+#else
+#define TASK_PPID_NR(tsk) task_ppid_nr(tsk)
 #endif
 
 #endif

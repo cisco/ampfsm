@@ -422,8 +422,9 @@ done:
     return ret;
 }
 
-fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char *filename)
+fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filename)
 {
+    char comm[TASK_COMM_LEN+1] = { 0 };
     fileop_data_t *data = NULL;
     long err;
 
@@ -463,10 +464,10 @@ fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char *filename)
          * to the system call. */
         if (err == -EFAULT) {
             amp_log_info("strncpy_from_user access to userspace failed (comm: %s, pid: %d)",
-                         current->comm, current->tgid);
+                         get_task_comm(comm, current), task_tgid_nr(current));
         } else {
             amp_log_err("strncpy_from_user failed (comm: %s, pid: %d): %ld",
-                        current->comm, current->tgid, err);
+                        get_task_comm(comm, current), task_tgid_nr(current), err);
         }
         fileop_free(data);
         data = NULL;
@@ -474,8 +475,8 @@ fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char *filename)
     }
 
     data->path[PATH_MAX-1] = '\0';
-    data->pid = current->tgid;
-    data->ppid = current->real_parent ? current->real_parent->tgid : -1;
+    data->pid = task_tgid_nr(current);
+    data->ppid = TASK_PPID_NR(current);
     data->uid = TASK_UID(current);
     data->op = op;
     data->dirfd = dirfd;

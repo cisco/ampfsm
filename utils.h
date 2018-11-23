@@ -7,7 +7,10 @@
 #define UTILS_H
 
 #include <linux/types.h>
+
+#ifndef __KERNEL__
 #include <stddef.h>
+#endif
 
 /**
  * @brief Normalize a Linux file path. This does not follow symlinks.

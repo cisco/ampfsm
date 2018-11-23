@@ -76,8 +76,8 @@ struct state {
  * @param[in] flags - As described in `man renameat`
  */
 static void _op_pre_process(int probe_idx,
-                            int olddirfd, const char *oldpath,
-                            int newdirfd, const char *newpath,
+                            int olddirfd, const char __user *oldpath,
+                            int newdirfd, const char __user *newpath,
                             int flags);
 
 /**
@@ -107,10 +107,12 @@ static int _op_send(fileop_data_t *data);
  *        a fixed size array to wait for its corresponding kretprobe to retrieve
  *        the return code.
  *
- * @param[in] oldpath - Relative or absolute path of the original file
- * @param[in] newpath - Relative or absolute path of the new file
+ * @param[in] oldpath - Relative or absolute path of the original file in user
+ *                      address space
+ * @param[in] newpath - Relative or absolute path of the new file in user
+ *                      address space
  */
-static void _rename_handler(const char *oldpath, const char *newpath);
+static void _rename_handler(const char __user *oldpath, const char __user *newpath);
 
 /**
  * @brief jprobe handler for the `renameat` sys call. The event will be stored
@@ -119,13 +121,15 @@ static void _rename_handler(const char *oldpath, const char *newpath);
  *
  * @param[in] olddirfd - File descriptor of the directory where the file is
  *                       moving from
- * @param[in] oldpath - Relative or absolute path of the original file
+ * @param[in] oldpath - Relative or absolute path of the original file in user
+ *                      address space
  * @param[in] newdirfd - File descriptor of the directory where the file is
  *                       moving to
- * @param[in] newpath - Relative or absolute path of the new file
+ * @param[in] newpath - Relative or absolute path of the new file in user
+ *                      address space
  */
-static void _renameat_handler(int olddirfd, const char *oldpath,
-                              int newdirfd, const char *newpath);
+static void _renameat_handler(int olddirfd, const char __user *oldpath,
+                              int newdirfd, const char __user *newpath);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
 /**
@@ -135,14 +139,16 @@ static void _renameat_handler(int olddirfd, const char *oldpath,
  *
  * @param[in] olddirfd - File descriptor of the directory where the file is
  *                       moving from
- * @param[in] oldpath - Relative or absolute path of the original file
+ * @param[in] oldpath - Relative or absolute path of the original file in user
+ *                      address space
  * @param[in] newdirfd - File descriptor of the directory where the file is
  *                       moving to
- * @param[in] newpath - Relative or absolute path of the new file
+ * @param[in] newpath - Relative or absolute path of the new file in user
+ *                      address space
  * @param[in] flags - As described in `man renameat2`
  */
-static void _renameat2_handler(int olddirfd, const char *oldpath,
-                               int newdirfd, const char *newpath, int flags);
+static void _renameat2_handler(int olddirfd, const char __user *oldpath,
+                               int newdirfd, const char __user *newpath, int flags);
 #endif
 
 /**
@@ -326,8 +332,8 @@ static size_t _events_reset(struct _event_elem events[], size_t event_size)
 }
 
 static void _op_pre_process(int probe_idx,
-                            int olddirfd, const char *oldpath,
-                            int newdirfd, const char *newpath,
+                            int olddirfd, const char __user *oldpath,
+                            int newdirfd, const char __user *newpath,
                             int flags)
 {
     fileop_data_t *data;
@@ -344,7 +350,7 @@ static void _op_pre_process(int probe_idx,
 
     if (!(_state.filter & _state.probes[probe_idx].op)) {
         amp_log_debug("[jprobe][tid:%d][probe:%d] Event not in filter, dropping...",
-                      current->pid, probe_idx);
+                      task_pid_nr(current), probe_idx);
         goto done;
     }
 
@@ -358,12 +364,12 @@ static void _op_pre_process(int probe_idx,
     }
 
     amp_log_debug("[jprobe][tid:%d][probe:%d] Found free slot: %d",
-                  current->pid, probe_idx, free_idx);
+                  task_pid_nr(current), probe_idx, free_idx);
 
     data = fileop_new(_state.probes[probe_idx].op, newdirfd, newpath);
     /* fileop_new will log on error. When fileop_new fails we save the event
        as the kretprobe handler will be expecting a matching thread ID event. */
-    _state.probes[probe_idx].events[free_idx].tid = current->pid;
+    _state.probes[probe_idx].events[free_idx].tid = task_pid_nr(current);
     _state.probes[probe_idx].events[free_idx].fileop = data;
 done:
     if (locked) {
@@ -384,18 +390,18 @@ static void _op_post_process(int probe_idx, int ret)
 
     if (!(_state.filter & _state.probes[probe_idx].op)) {
         amp_log_debug("[kretprobe][tid:%d][probe:%d] Event not in filter, dropping...",
-                      current->pid, probe_idx);
+                      task_pid_nr(current), probe_idx);
         goto done;
     }
 
     spin_lock(&_state.probes[probe_idx].events_lock);
     locked = 1;
-    pid_idx = _events_find_tid_index(current->pid,
+    pid_idx = _events_find_tid_index(task_pid_nr(current),
                                      _state.probes[probe_idx].events,
                                      ARRAY_SIZE(_state.probes[probe_idx].events));
     if (pid_idx < 0) {
         amp_log_err("[kretprobe][tid:%d][probe:%d] Matching event not found, "
-                    "dropping...",  current->pid, probe_idx);
+                    "dropping...",  task_pid_nr(current), probe_idx);
         goto done;
     }
 
@@ -415,13 +421,13 @@ static void _op_post_process(int probe_idx, int ret)
     }
 
     amp_log_debug("[kretprobe][tid:%d][probe:%d] Found event: %d",
-                  current->pid, probe_idx, pid_idx);
+                  task_pid_nr(current), probe_idx, pid_idx);
 
     /* If the return code is 0 (success) we attempt to build an absolute path
      * from the stored sys call arguments and normalize it. */
     if (ret != 0) {
         amp_log_info("[kretprobe][tid:%d][probe:%d] Return code non-zero (%d), "
-                     "dropping...",  current->pid, probe_idx, ret);
+                     "dropping...",  task_pid_nr(current), probe_idx, ret);
         goto done;
     }
 
@@ -464,15 +470,15 @@ done:
     return ret;
 }
 
-static void _rename_handler(const char *oldpath, const char *newpath)
+static void _rename_handler(const char __user *oldpath, const char __user *newpath)
 {
     _op_pre_process(FCW_PROBE_SYS_RENAME_IDX,
                     AT_FDCWD, oldpath, AT_FDCWD, newpath, 0);
     jprobe_return();
 }
 
-static void _renameat_handler(int olddirfd, const char *oldpath,
-                              int newdirfd, const char *newpath)
+static void _renameat_handler(int olddirfd, const char __user *oldpath,
+                              int newdirfd, const char __user *newpath)
 {
     _op_pre_process(FCW_PROBE_SYS_RENAMEAT_IDX,
                     olddirfd, oldpath, newdirfd, newpath, 0);
@@ -480,8 +486,8 @@ static void _renameat_handler(int olddirfd, const char *oldpath,
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
-static void _renameat2_handler(int olddirfd, const char *oldpath,
-                               int newdirfd, const char *newpath, int flags)
+static void _renameat2_handler(int olddirfd, const char __user *oldpath,
+                               int newdirfd, const char __user *newpath, int flags)
 {
     _op_pre_process(FCW_PROBE_SYS_RENAMEAT2_IDX,
                     olddirfd, oldpath, newdirfd, newpath, flags);

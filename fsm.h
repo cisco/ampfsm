@@ -27,11 +27,11 @@ typedef struct {
  * @param[in] op - File operation type
  * @param[in] dirfd - File descriptor of directory where filename got moved to.
  *                    This will be set only when filename is relative.
- * @param[in] filename - File name
+ * @param[in] filename - Filename buffer in the user address space
  *
  * @return Pointer to newly allocated fileop_data_t struct or NULL on error.
  */
-fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char *filename);
+fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filename);
 
 /**
  * @brief Free fileop_data_t struct.
