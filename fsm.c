@@ -424,7 +424,7 @@ done:
 
 fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filename)
 {
-    char comm[TASK_COMM_LEN+1] = { 0 };
+    char comm[TASK_COMM_LEN] = { 0 };
     fileop_data_t *data = NULL;
     long err;
 
