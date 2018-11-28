@@ -13,6 +13,7 @@ typedef struct {
     /* Kernel */
     struct work_struct work;
     int dirfd;
+    struct path pwd;
     /* User space */
     amp_fsm_op_t op;
     char *path;

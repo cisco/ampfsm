@@ -426,8 +426,8 @@ static void _op_post_process(int probe_idx, int ret)
     /* If the return code is 0 (success) we attempt to build an absolute path
      * from the stored sys call arguments and normalize it. */
     if (ret != 0) {
-        amp_log_info("[kretprobe][tid:%d][probe:%d] Return code non-zero (%d), "
-                     "dropping...",  task_pid_nr(current), probe_idx, ret);
+        amp_log_debug("[kretprobe][tid:%d][probe:%d] Return code non-zero (%d), "
+                      "dropping...",  task_pid_nr(current), probe_idx, ret);
         goto done;
     }
 

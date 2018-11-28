@@ -147,11 +147,10 @@ static int _op_cb(fileop_data_t *data);
  *        the resulting path.
  *
  * @param[in] data - fileop pointer
- * @param[in] path - Pointer to struct path
  *
  * @return 0 on success, -1 on error
  */
-static int _build_path(fileop_data_t *data, struct path *path);
+static int _build_path(fileop_data_t *data);
 
 static struct genl_ops _g_genl_ops[] = {
     {
@@ -234,6 +233,11 @@ static inline void __msg_send_task(fileop_data_t *data)
     int mutex_locked = 0;
     struct sk_buff *skb = NULL;
     void *genl_msg;
+
+    if (_build_path(data) != 0) {
+        amp_log_err("_build_path failed, dropping...");
+        goto done;
+    }
 
     skb = alloc_skb(SKB_MAX_ALLOC, GFP_KERNEL);
     if (!skb) {
@@ -362,7 +366,7 @@ static int _op_cb(fileop_data_t *data)
     return 0;
 }
 
-static int _build_path(fileop_data_t *data, struct path *path)
+static int _build_path(fileop_data_t *data)
 {
     int ret = -1;
     int n;
@@ -370,19 +374,19 @@ static int _build_path(fileop_data_t *data, struct path *path)
     char *cur_ptr;
     char *norm_path = NULL;
 
-    cur_path = kmem_cache_alloc(_state.path_name_kmem_cache, GFP_ATOMIC);
+    cur_path = kmem_cache_alloc(_state.path_name_kmem_cache, GFP_KERNEL);
     if (!cur_path) {
         amp_log_err("kmem_cache_alloc(proc_name) failed");
         goto done;
     }
 
-    norm_path = kmem_cache_alloc(_state.path_normalize_kmem_cache, GFP_ATOMIC);
+    norm_path = kmem_cache_alloc(_state.path_normalize_kmem_cache, GFP_KERNEL);
     if (!norm_path) {
         amp_log_err("kmem_cache_alloc(path_normalize) failed");
         goto done;
     }
 
-    cur_ptr = dentry_path_raw(path->dentry, cur_path, PATH_MAX);
+    cur_ptr = d_path(&data->pwd, cur_path, PATH_MAX);
     if (!cur_ptr || (cur_ptr && IS_ERR(cur_ptr))) {
         amp_log_err("dentry_path_raw failed");
         goto done;
@@ -418,6 +422,8 @@ done:
         kmem_cache_free(_state.path_normalize_kmem_cache, norm_path);
         norm_path = NULL;
     }
+    /* path_put may sleep */
+    path_put(&data->pwd);
 
     return ret;
 }
@@ -488,10 +494,12 @@ done:
 int fileop_set_path(fileop_data_t *data)
 {
     int ret = -1;
-    struct path pwd;
     struct file *file;
 
-    if (!data || !data->path || !*data->path) {
+    /* Required before accessing ->fs - see the comments for task_lock() */
+    task_lock(current);
+
+    if (!data || !data->path || !*data->path || !current->fs) {
         goto done;
     }
 
@@ -501,11 +509,11 @@ int fileop_set_path(fileop_data_t *data)
         /* For chrooted environments the path given to the syscall may be
          * relative to the chroot root directory. Therefore, a path "/usr/bin/cp"
          * may actually be /var/chroot/usr/bin/cp". */
-        get_fs_root(current->fs, &pwd);
+        get_fs_root(current->fs, &data->pwd);
     } else if (data->dirfd == AT_FDCWD) {
         amp_log_debug("Fetching path from cwd");
 
-        get_fs_pwd(current->fs, &pwd);
+        get_fs_pwd(current->fs, &data->pwd);
     } else {
         amp_log_debug("Fetching path from fd: %d", data->dirfd);
 
@@ -520,15 +528,14 @@ int fileop_set_path(fileop_data_t *data)
             goto done;
         }
 
-        pwd = file->f_path;
-        path_get(&pwd);
+        data->pwd = file->f_path;
+        path_get(&data->pwd);
         fput(file);
     }
 
-    ret = _build_path(data, &pwd);
-
-    path_put(&pwd);
+    ret = 0;
 done:
+    task_unlock(current);
     return ret;
 }
 
