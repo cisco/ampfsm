@@ -14,10 +14,8 @@
  *        struct.
  *
  * @param[in] data - File operation information
- *
- * return @todo (currently not used)
  */
-typedef int (*fcw_op_cb_t)(fileop_data_t *data);
+typedef void (*fcw_op_cb_t)(fileop_data_t *data);
 
 typedef struct {
     fcw_op_cb_t op;

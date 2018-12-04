@@ -137,10 +137,8 @@ static void _msg_send_task(void *param);
  *        prior to this callback.
  *
  * @param[in] data - File operation structure
- *
- * @return todo
  */
-static int _op_cb(fileop_data_t *data);
+static void _op_cb(fileop_data_t *data);
 
 /**
  * @brief Join the struct path file path to the fileop file path and normalize
@@ -345,7 +343,7 @@ static void _msg_send_task(void *param)
 }
 #endif
 
-static int _op_cb(fileop_data_t *data)
+static void _op_cb(fileop_data_t *data)
 {
     const char *event_name = _fileop_name(data->op);
 
@@ -362,8 +360,6 @@ static int _op_cb(fileop_data_t *data)
 #endif
     (void)queue_work(_state.msg_send_wq, &data->work);
     data = NULL;
-
-    return 0;
 }
 
 static int _build_path(fileop_data_t *data)
@@ -376,7 +372,7 @@ static int _build_path(fileop_data_t *data)
 
     cur_path = kmem_cache_alloc(_state.path_name_kmem_cache, GFP_KERNEL);
     if (!cur_path) {
-        amp_log_err("kmem_cache_alloc(proc_name) failed");
+        amp_log_err("kmem_cache_alloc(path_name) failed");
         goto done;
     }
 
@@ -386,9 +382,10 @@ static int _build_path(fileop_data_t *data)
         goto done;
     }
 
+    /* d_path may sleep */
     cur_ptr = d_path(&data->pwd, cur_path, PATH_MAX);
     if (!cur_ptr || (cur_ptr && IS_ERR(cur_ptr))) {
-        amp_log_err("dentry_path_raw failed");
+        amp_log_err("d_path failed");
         goto done;
     }
 
@@ -491,12 +488,12 @@ done:
     return data;
 }
 
-int fileop_set_path(fileop_data_t *data)
+int fileop_set_pwd(fileop_data_t *data)
 {
     int ret = -1;
     struct file *file;
 
-    /* Required before accessing ->fs - see the comments for task_lock() */
+    /* Required before accessing current->fs - see the comments for task_lock() */
     task_lock(current);
 
     if (!data || !data->path || !*data->path || !current->fs) {

@@ -423,21 +423,13 @@ static void _op_post_process(int probe_idx, int ret)
     amp_log_debug("[kretprobe][tid:%d][probe:%d] Found event: %d",
                   task_pid_nr(current), probe_idx, pid_idx);
 
-    /* If the return code is 0 (success) we attempt to build an absolute path
-     * from the stored sys call arguments and normalize it. */
     if (ret != 0) {
         amp_log_debug("[kretprobe][tid:%d][probe:%d] Return code non-zero (%d), "
                       "dropping...",  task_pid_nr(current), probe_idx, ret);
         goto done;
     }
 
-    if (fileop_set_path(fileop) != 0) {
-        amp_log_err("fileop_set_path failed, dropping...");
-        goto done;
-    }
-
     if (_op_send(fileop) != 0) {
-        amp_log_err("Failed to queue event, dropping...");
         goto done;
     }
     /* Passed off to workqueue */
@@ -458,11 +450,19 @@ static int _op_send(fileop_data_t *data)
 {
     int ret = -1;
 
+    /* ensure that op is not NULL before calling fileop_set_pwd -
+     * data->pwd must be freed in the workqueue */
     if (!data || !_state.initialized || !_state.cb.op) {
+        amp_log_err("NULL parameter, dropping...");
         goto done;
     }
 
-    (void)_state.cb.op(data);
+    if (fileop_set_pwd(data) != 0) {
+        amp_log_err("fileop_set_pwd failed, dropping...");
+        goto done;
+    }
+
+    _state.cb.op(data);
     /* Pass data off */
     data = NULL;
     ret = 0;
