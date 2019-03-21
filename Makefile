@@ -1,5 +1,7 @@
-ifndef TARGET_KERNEL_VERSION
-    TARGET_KERNEL_VERSION=$(shell uname -r)
+TARGET_KERNEL_VERSION?=$(shell uname -r)
+
+ifdef KERNEL_BUILD_USE_SYSTEM_PATH
+	export PATH := $(getconf PATH):/usr/bin:/bin
 endif
 
 all:
