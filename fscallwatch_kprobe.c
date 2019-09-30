@@ -359,7 +359,7 @@ static void _op_pre_process(int probe_idx,
     free_idx = _events_find_free_index(_state.probes[probe_idx].events,
                                        ARRAY_SIZE(_state.probes[probe_idx].events));
     if (free_idx < 0) {
-        amp_log_err("_events_find_free_index failed, dropping...");
+        amp_log_debug("_events_find_free_index failed, dropping...");
         goto done;
     }
 
@@ -400,7 +400,7 @@ static void _op_post_process(int probe_idx, int ret)
                                      _state.probes[probe_idx].events,
                                      ARRAY_SIZE(_state.probes[probe_idx].events));
     if (pid_idx < 0) {
-        amp_log_err("[kretprobe][tid:%d][probe:%d] Matching event not found, "
+        amp_log_debug("[kretprobe][tid:%d][probe:%d] Matching event not found, "
                     "dropping...",  task_pid_nr(current), probe_idx);
         goto done;
     }
