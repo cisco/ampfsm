@@ -567,6 +567,20 @@ int fcw_deinit(void)
     size_t probe_idx, dropped_events = 0;
     struct _probe_elem *probe;
 
+    /* MUST unregister kretprobes before jprobes. If the system is in a
+     * kretprobe handler while a jprobe is being unregistered, the kernel will
+     * crash on a breakpoint (int3).
+     * Fixes https://access.redhat.com/solutions/4710551 */
+    for (probe_idx = 0; probe_idx < FCW_PROBE_COUNT; probe_idx++) {
+        probe = &_state.probes[probe_idx];
+
+        if (probe->k.registered) {
+            unregister_kretprobe(&probe->k.probe);
+            probe->k.registered = 0;
+            amp_log_debug("[probe:%d] unregistered kretprobe", probe_idx);
+        }
+    }
+
     for (probe_idx = 0; probe_idx < FCW_PROBE_COUNT; probe_idx++) {
         probe = &_state.probes[probe_idx];
 
@@ -574,12 +588,6 @@ int fcw_deinit(void)
             unregister_jprobe(&probe->j.probe);
             probe->j.registered = 0;
             amp_log_debug("[probe:%d] unregistered jprobe", probe_idx);
-        }
-
-        if (probe->k.registered) {
-            unregister_kretprobe(&probe->k.probe);
-            probe->k.registered = 0;
-            amp_log_debug("[probe:%d] unregistered kretprobe", probe_idx);
         }
 
         dropped_events = _events_reset(probe->events, ARRAY_SIZE(probe->events));
