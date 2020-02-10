@@ -22,12 +22,14 @@
                                         never be 0 or -1. We use -1 to represent
                                         an invalid or missing thread ID. */
 
+/** @note This list must be ordered such that the syscall with the actual rename
+ *        implementation is listed first. Kernels with renameat2 implement
+ *        renameat and rename by calling renameat2.
+ */
 enum {
-    FCW_PROBE_SYS_RENAME_IDX = 0,
+    FCW_PROBE_SYS_RENAMEAT2_IDX = 0,
     FCW_PROBE_SYS_RENAMEAT_IDX,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
-    FCW_PROBE_SYS_RENAMEAT2_IDX,
-#endif
+    FCW_PROBE_SYS_RENAME_IDX,
     FCW_PROBE_COUNT,
 };
 
@@ -131,7 +133,6 @@ static void _rename_handler(const char __user *oldpath, const char __user *newpa
 static void _renameat_handler(int olddirfd, const char __user *oldpath,
                               int newdirfd, const char __user *newpath);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
 /**
  * @brief jprobe handler for the `renameat2` sys call. The event will be stored
  *        in a fixed size array to wait for its corresponding kretprobe to
@@ -149,7 +150,6 @@ static void _renameat_handler(int olddirfd, const char __user *oldpath,
  */
 static void _renameat2_handler(int olddirfd, const char __user *oldpath,
                                int newdirfd, const char __user *newpath, int flags);
-#endif
 
 /**
  * @brief kretprobe handler for the `rename` sys call. A matching jprobe event
@@ -181,7 +181,6 @@ static int _rename_post_handler(struct kretprobe_instance *ri,
 static int _renameat_post_handler(struct kretprobe_instance *ri,
                                   struct pt_regs *regs);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
 /**
  * @brief kretprobe handler for the `renameat2` sys call. A matching jprobe
  *        event will be fetched from a buffer by the current process ID. If no
@@ -196,7 +195,6 @@ static int _renameat_post_handler(struct kretprobe_instance *ri,
  */
 static int _renameat2_post_handler(struct kretprobe_instance *ri,
                                    struct pt_regs *regs);
-#endif
 
 /**
  * @brief Find event with matching thread ID and return the index.
@@ -242,24 +240,7 @@ static size_t _events_reset(struct _event_elem events[], size_t event_size);
 
 static struct state _state = {
     .probes = {
-        {
-            .op = AMP_FSM_OP_RENAME,
-            .j.probe.kp.symbol_name = "sys_rename",
-            .j.probe.entry = _rename_handler,
-            .k.probe.kp.symbol_name = "sys_rename",
-            .k.probe.handler = _rename_post_handler,
-            .k.probe.maxactive = FCW_KRETPROBE_MAXACTIVE,
-        },
-        {
-            .op = AMP_FSM_OP_RENAME,
-            .j.probe.kp.symbol_name = "sys_renameat",
-            .j.probe.entry = _renameat_handler,
-            .k.probe.kp.symbol_name = "sys_renameat",
-            .k.probe.handler = _renameat_post_handler,
-            .k.probe.maxactive = FCW_KRETPROBE_MAXACTIVE,
-        },
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
-        {
+        [FCW_PROBE_SYS_RENAMEAT2_IDX] = {
             .op = AMP_FSM_OP_RENAME,
             .j.probe.kp.symbol_name = "sys_renameat2",
             .j.probe.entry = _renameat2_handler,
@@ -267,7 +248,22 @@ static struct state _state = {
             .k.probe.handler = _renameat2_post_handler,
             .k.probe.maxactive = FCW_KRETPROBE_MAXACTIVE,
         },
-#endif
+        [FCW_PROBE_SYS_RENAMEAT_IDX] = {
+            .op = AMP_FSM_OP_RENAME,
+            .j.probe.kp.symbol_name = "sys_renameat",
+            .j.probe.entry = _renameat_handler,
+            .k.probe.kp.symbol_name = "sys_renameat",
+            .k.probe.handler = _renameat_post_handler,
+            .k.probe.maxactive = FCW_KRETPROBE_MAXACTIVE,
+        },
+        [FCW_PROBE_SYS_RENAME_IDX] = {
+            .op = AMP_FSM_OP_RENAME,
+            .j.probe.kp.symbol_name = "sys_rename",
+            .j.probe.entry = _rename_handler,
+            .k.probe.kp.symbol_name = "sys_rename",
+            .k.probe.handler = _rename_post_handler,
+            .k.probe.maxactive = FCW_KRETPROBE_MAXACTIVE,
+        },
     }
 };
 
@@ -349,8 +345,8 @@ static void _op_pre_process(int probe_idx,
     }
 
     if (!(_state.filter & _state.probes[probe_idx].op)) {
-        amp_log_debug("[jprobe][tid:%d][probe:%d] Event not in filter, dropping...",
-                      task_pid_nr(current), probe_idx);
+        amp_log_debug("[jprobe][tid:%d][probe:%s] Event not in filter, dropping...",
+                      task_pid_nr(current), _state.probes[probe_idx].j.probe.kp.symbol_name);
         goto done;
     }
 
@@ -363,8 +359,8 @@ static void _op_pre_process(int probe_idx,
         goto done;
     }
 
-    amp_log_debug("[jprobe][tid:%d][probe:%d] Found free slot: %d",
-                  task_pid_nr(current), probe_idx, free_idx);
+    amp_log_debug("[jprobe][tid:%d][probe:%s] Found free slot: %d",
+                  task_pid_nr(current), _state.probes[probe_idx].j.probe.kp.symbol_name, free_idx);
 
     data = fileop_new(_state.probes[probe_idx].op, newdirfd, newpath);
     /* fileop_new will log on error. When fileop_new fails we save the event
@@ -389,8 +385,8 @@ static void _op_post_process(int probe_idx, int ret)
     }
 
     if (!(_state.filter & _state.probes[probe_idx].op)) {
-        amp_log_debug("[kretprobe][tid:%d][probe:%d] Event not in filter, dropping...",
-                      task_pid_nr(current), probe_idx);
+        amp_log_debug("[kretprobe][tid:%d][probe:%s] Event not in filter, dropping...",
+                      task_pid_nr(current), _state.probes[probe_idx].k.probe.kp.symbol_name);
         goto done;
     }
 
@@ -400,8 +396,8 @@ static void _op_post_process(int probe_idx, int ret)
                                      _state.probes[probe_idx].events,
                                      ARRAY_SIZE(_state.probes[probe_idx].events));
     if (pid_idx < 0) {
-        amp_log_debug("[kretprobe][tid:%d][probe:%d] Matching event not found, "
-                    "dropping...",  task_pid_nr(current), probe_idx);
+        amp_log_debug("[kretprobe][tid:%d][probe:%s] Matching event not found, "
+                    "dropping...",  task_pid_nr(current), _state.probes[probe_idx].k.probe.kp.symbol_name);
         goto done;
     }
 
@@ -420,12 +416,12 @@ static void _op_post_process(int probe_idx, int ret)
         goto done;
     }
 
-    amp_log_debug("[kretprobe][tid:%d][probe:%d] Found event: %d",
-                  task_pid_nr(current), probe_idx, pid_idx);
+    amp_log_debug("[kretprobe][tid:%d][probe:%s] Found event: %d",
+                  task_pid_nr(current), _state.probes[probe_idx].k.probe.kp.symbol_name, pid_idx);
 
     if (ret != 0) {
-        amp_log_debug("[kretprobe][tid:%d][probe:%d] Return code non-zero (%d), "
-                      "dropping...",  task_pid_nr(current), probe_idx, ret);
+        amp_log_debug("[kretprobe][tid:%d][probe:%s] Return code non-zero (%d), "
+                      "dropping...",  task_pid_nr(current), _state.probes[probe_idx].k.probe.kp.symbol_name, ret);
         goto done;
     }
 
@@ -485,7 +481,6 @@ static void _renameat_handler(int olddirfd, const char __user *oldpath,
     jprobe_return();
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
 static void _renameat2_handler(int olddirfd, const char __user *oldpath,
                                int newdirfd, const char __user *newpath, int flags)
 {
@@ -493,7 +488,6 @@ static void _renameat2_handler(int olddirfd, const char __user *oldpath,
                     olddirfd, oldpath, newdirfd, newpath, flags);
     jprobe_return();
 }
-#endif
 
 static int _rename_post_handler(struct kretprobe_instance *ri,
                                 struct pt_regs *regs)
@@ -509,19 +503,19 @@ static int _renameat_post_handler(struct kretprobe_instance *ri,
     return 0;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
 static int _renameat2_post_handler(struct kretprobe_instance *ri,
                                    struct pt_regs *regs)
 {
     _op_post_process(FCW_PROBE_SYS_RENAMEAT2_IDX, regs_return_value(regs));
     return 0;
 }
-#endif
 
 int fcw_init(fcw_cb_t *cb, amp_fsm_op_t filter)
 {
     int ret = 0;
     size_t probe_idx;
+    int err;
+    size_t num_probes_registered = 0;
 
     if (_state.initialized || !cb || !cb->op) {
         ret = -EINVAL;
@@ -533,31 +527,55 @@ int fcw_init(fcw_cb_t *cb, amp_fsm_op_t filter)
 
         spin_lock_init(&probe->events_lock);
 
-        ret = register_jprobe(&probe->j.probe);
-        if (ret != 0) {
-            goto unregister;
-        }
-        probe->j.registered = 1;
-        amp_log_debug("[probe:%d] registered jprobe", probe_idx);
-
-        ret = register_kretprobe(&probe->k.probe);
-        if (ret != 0) {
-            goto unregister;
-        }
-        probe->k.registered = 1;
-        amp_log_debug("[probe:%d] registered kretprobe", probe_idx);
-
         _events_init(probe->events, ARRAY_SIZE(probe->events));
 
+        err = register_jprobe(&probe->j.probe);
+        if (err != 0) {
+            if (err == -ENOENT) {
+                amp_log_warning("[probe:%s] symbol not found, skipping", probe->j.probe.kp.symbol_name);
+                continue;
+            }
+            goto done;
+        }
+        probe->j.registered = 1;
+        amp_log_debug("[probe:%s] registered jprobe", probe->j.probe.kp.symbol_name);
+
+        err = register_kretprobe(&probe->k.probe);
+        if (err != 0) {
+            if (err == -ENOENT) {
+                amp_log_warning("[probe:%s] symbol not found, skipping", probe->k.probe.kp.symbol_name);
+                unregister_jprobe(&probe->j.probe);
+                probe->j.registered = 0;
+                continue;
+            }
+            goto done;
+        }
+        probe->k.registered = 1;
+        amp_log_debug("[probe:%s] registered kretprobe", probe->k.probe.kp.symbol_name);
+        num_probes_registered++;
+
+        /* If renameat2 exists, renameat and rename are implemented by calling
+         * sys_renameat2.
+         * If renameat exists but not renameat2, rename is implemented by
+         * calling sys_renameat.
+         * Therefore, we only need to probe a single function.
+         */
+        break;
+    }
+
+    if (num_probes_registered == 0) {
+        amp_log_err("No probes registered");
+        goto done;
     }
 
     _state.filter = filter;
     _state.cb = *cb;
     _state.initialized = 1;
-    goto done;
-unregister:
-    (void) fcw_deinit();
+    ret = 0;
 done:
+    if (ret) {
+        (void) fcw_deinit();
+    }
     return ret;
 }
 
@@ -577,7 +595,7 @@ int fcw_deinit(void)
         if (probe->k.registered) {
             unregister_kretprobe(&probe->k.probe);
             probe->k.registered = 0;
-            amp_log_debug("[probe:%d] unregistered kretprobe", probe_idx);
+            amp_log_debug("[probe:%s] unregistered kretprobe", probe->k.probe.kp.symbol_name);
         }
     }
 
@@ -587,13 +605,16 @@ int fcw_deinit(void)
         if (probe->j.registered) {
             unregister_jprobe(&probe->j.probe);
             probe->j.registered = 0;
-            amp_log_debug("[probe:%d] unregistered jprobe", probe_idx);
+            amp_log_debug("[probe:%s] unregistered jprobe", probe->j.probe.kp.symbol_name);
         }
 
         dropped_events = _events_reset(probe->events, ARRAY_SIZE(probe->events));
 
-        amp_log_debug("[probe:%d] cleaned up %zu events", probe_idx,
-                      dropped_events);
+        if (dropped_events > 0) {
+            amp_log_debug("[probe:%s] cleaned up %zu events",
+                          probe->j.probe.kp.symbol_name,
+                          dropped_events);
+        }
     }
 
     _state.filter = 0;
