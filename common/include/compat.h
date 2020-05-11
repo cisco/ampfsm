@@ -124,12 +124,12 @@
 
 /* genl_register_family_with_ops
  *
- * Kernel 4.10+, and RHEL 7.5 - 7.7 (kernel 3.10.0-862 - 3.10.0-1062): not present - use only genl_register_family
+ * Kernel 4.10+, and RHEL 7.5+ (kernel 3.10.0-862+): not present - use only genl_register_family
  * Kernel 3.13+, and RHEL 7.1 - 7.4 (kernel 3.10.0-229 - 3.10.0-693): 2-arg version
  * Kernel 2.6.31+ (but not RHEL 7.1 - 7.5): 3-arg version
  * Older kernels: not present - use genl_register_family and genl_register_ops
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5) && RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7,7)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 5)
 static inline int __amp_genl_register_family_with_ops(struct genl_family *family,
                                                       struct genl_ops *ops,
                                                       int n_ops)
@@ -187,10 +187,10 @@ done:
 
 /* genl_unregister_family - with ops
  *
- * Kernel 3.13+, and RHEL 7.1 - 7.6 (kernel 3.10.0-229 - 3.10.0-1062): use only genl_unregister_family
+ * Kernel 3.13+, and RHEL 7.1+ (kernel 3.10.0-229+): use only genl_unregister_family
  * Older kernels (but not RHEL 7.1 - 7.6): use genl_unregister_family and genl_unregister_ops
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,13,0) || (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,1) && RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7,7))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 1)
 #   define GENL_UNREGISTER_FAMILY_WITH_OPS(family, ops) \
         genl_unregister_family(family)
 #else
