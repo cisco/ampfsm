@@ -200,6 +200,11 @@ static int _rec_msg(struct cb_data *cb_data, char *buf, int buf_size, struct mnl
     int run = 1;
     int ret = -1;
 
+    if (!cb_data || !buf || !nl) {
+        fprintf(stderr, "_rec_msg: NULL argument passed\n");
+        goto done;
+    }
+
     while (run > 0) {
         n = mnl_socket_recvfrom(nl, buf, buf_size);
         if (n <= 0) {
