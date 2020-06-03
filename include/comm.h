@@ -20,10 +20,11 @@ typedef uint32_t amp_fsm_op_t;
 /* generic netlink - commands */
 enum {
     AMP_FSM_CMD_UNSPEC,
-    AMP_FSM_CMD_HELLO,    /* Initial message sent by user-space program
-                             to kernel */
-    AMP_FSM_CMD_SET_OPTS, /* Set options */
-    AMP_FSM_CMD_REC_OP,   /* Kernel file operation event */
+    AMP_FSM_CMD_HELLO,     /* Initial message sent by user-space program
+                              to kernel */
+    AMP_FSM_CMD_SET_OPTS,  /* Set options */
+    AMP_FSM_CMD_REC_OP,    /* Kernel file operation event */
+    AMP_FSM_CMD_REC_HELLO, /* Kernels response to userland hello message */
 };
 
 /* generic netlink - attributes */

@@ -29,6 +29,7 @@
 struct cb_data {
     uint16_t amp_family_id;
     bool is_set;
+    bool hello_rec;
     struct mnl_socket *nl;
     unsigned int *seq;
 };
@@ -144,6 +145,10 @@ static int _data_cb(const struct nlmsghdr *nlh, void *data)
             case AMP_FSM_CMD_REC_OP:
                 printf("EVENT");
                 break;
+            case AMP_FSM_CMD_REC_HELLO:
+                printf("HELLO REC");
+                cb_data->hello_rec = true;
+                break;
             default:
                 printf("???");
                 break;
@@ -189,6 +194,37 @@ done:
     return ret;
 }
 
+static int _rec_msg(struct cb_data *cb_data, char *buf, int buf_size, struct mnl_socket *nl, unsigned int seq, unsigned int portid)
+{
+    int n;
+    int run = 1;
+    int ret = -1;
+
+    while (run > 0) {
+        n = mnl_socket_recvfrom(nl, buf, buf_size);
+        if (n <= 0) {
+            if (n < 0) {
+                perror("mnl_socket_recvfrom");
+            } else {
+                fprintf(stderr, "mnl_socket_recvfrom: disconnected\n");
+            }
+            goto done;
+        }
+        run = mnl_cb_run(buf, n, seq, portid, _data_cb, cb_data);
+        if (run < 0) {
+            if (errno == ENOENT) {
+                fprintf(stderr, "Can not find family %s - kernel module may "
+                                "not be loaded\n", AMP_FSM_GENL_FAM_NAME);
+            }
+            perror("mnl_cb_run");
+            goto done;
+        }
+    }
+    ret = 0;
+done:
+    return ret;
+}
+
 static void _usage(const char *name)
 {
     printf("\nUSAGE: %s [OPTIONS]\n\n"
@@ -204,7 +240,7 @@ int main(int argc, char **argv)
     struct nlmsghdr *nlh;
     int ret = EXIT_FAILURE;
     unsigned int seq, portid;
-    struct cb_data cb_data = { 0, false, NULL, 0 };
+    struct cb_data cb_data = { 0, false, false, NULL, 0 };
     int n;
     char c;
     int run;
@@ -288,26 +324,8 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    run = 1;
-    while (run > 0) {
-        n = mnl_socket_recvfrom(nl, buf, sizeof(buf));
-        if (n <= 0) {
-            if (n < 0) {
-                perror("mnl_socket_recvfrom");
-            } else {
-                fprintf(stderr, "mnl_socket_recvfrom: disconnected\n");
-            }
-            goto done;
-        }
-        run = mnl_cb_run(buf, n, seq, portid, _data_cb, &cb_data);
-        if (run < 0) {
-            if (errno == ENOENT) {
-                fprintf(stderr, "Can not find family %s - kernel module may "
-                        "not be loaded\n", AMP_FSM_GENL_FAM_NAME);
-            }
-            perror("mnl_cb_run");
-            goto done;
-        }
+    if(_rec_msg(&cb_data, buf, sizeof(buf), nl, seq, portid) != 0) {
+        goto done;
     }
 
     if (!cb_data.is_set) {
@@ -335,13 +353,26 @@ int main(int argc, char **argv)
         }
 
         /* send hello */
+        printf("Sending Hello...\n");
         seq++;
-        nlh = _prepare_msg(buf, cb_data.amp_family_id, NLM_F_REQUEST, seq,
+        nlh = _prepare_msg(buf, cb_data.amp_family_id, NLM_F_REQUEST | NLM_F_ACK, seq,
                            AMP_FSM_GENL_VERSION, AMP_FSM_CMD_HELLO);
             if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
             perror("mnl_socket_sendto");
             goto done;
         }
+
+        /* Recieve hello rec */
+        printf("Looking for AMP_FSM_CMD_HELLO_REC response...\n");
+        if(_rec_msg(&cb_data, buf, sizeof(buf), nl, seq, portid) != 0) {
+            goto done;
+        }
+
+        if (!cb_data.hello_rec) {
+            fprintf(stderr, "No AMP_FSM_CMD_HELLO_REC response from kernel module\n");
+            goto done;
+        }
+        printf("AMP_FSM_CMD_HELLO_REC response recieved from kernel module\n");
 
         /* set options */
         seq++;
