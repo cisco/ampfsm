@@ -188,7 +188,7 @@ done:
 /* genl_unregister_family - with ops
  *
  * Kernel 3.13+, and RHEL 7.1+ (kernel 3.10.0-229+): use only genl_unregister_family
- * Older kernels (but not RHEL 7.1 - 7.6): use genl_unregister_family and genl_unregister_ops
+ * Older kernels (but not RHEL 7.1+): use genl_unregister_family and genl_unregister_ops
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 1)
 #   define GENL_UNREGISTER_FAMILY_WITH_OPS(family, ops) \
@@ -231,10 +231,10 @@ done:
 
 /* task_ppid_nr
  *
- * Kernel 3.12.21+ and RHEL 7.0+: task_ppid_nr is present
+ * Kernel 3.12.21+ and RHEL 7.1+: task_ppid_nr is present
  * Older kernels: not present - pull inline function from upstream
  */
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(3,12,20) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,0)
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(3,12,20) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,1)
 static inline pid_t __task_ppid_nr(struct task_struct *tsk)
 {
         pid_t pid = 0;
