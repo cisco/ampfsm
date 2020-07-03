@@ -367,7 +367,7 @@ int main(int argc, char **argv)
             goto done;
         }
 
-        /* Recieve hello rec */
+        /* Receive hello rec */
         printf("Looking for AMP_FSM_CMD_HELLO_REC response...\n");
         if(_rec_msg(&cb_data, buf, sizeof(buf), nl, seq, portid) != 0) {
             goto done;
@@ -377,7 +377,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "No AMP_FSM_CMD_HELLO_REC response from kernel module\n");
             goto done;
         }
-        printf("AMP_FSM_CMD_HELLO_REC response recieved from kernel module\n");
+        printf("AMP_FSM_CMD_HELLO_REC response received from kernel module\n");
 
         /* set options */
         seq++;
