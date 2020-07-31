@@ -132,6 +132,12 @@ static void _msg_send_task(void *param);
 #endif
 
 /**
+ * @brief Send an AMP_FSM_CMD_REC_HELLO signal to userland to 
+ *        signal successful communication link.
+ */
+static void _msg_send_hello_rec(void);
+
+/**
  * @brief File operation callback from the FS call watch API. Any events that
  *        do not match the filter (given by fscw_set_filter) will be dropped
  *        prior to this callback.
@@ -199,6 +205,7 @@ done:
 static int _hello(struct sk_buff *skb, struct genl_info *info)
 {
     (void)_update_portid(info);
+    _msg_send_hello_rec();
     return 0;
 }
 
@@ -223,6 +230,69 @@ static int _update_portid(struct genl_info *info)
     mutex_unlock(&_state.portid_mutex);
 done:
     return ret;
+}
+
+static inline void _msg_send_hello_rec()
+{
+    int err;
+    int mutex_locked = 0;
+    struct sk_buff *skb = NULL;
+    void *genl_msg;
+
+    skb = alloc_skb(SKB_MAX_ALLOC, GFP_KERNEL);
+    if (!skb) {
+        amp_log_err("alloc_skb failed");
+        goto done;
+    }
+
+    genl_msg = GENLMSG_PUT(skb,
+                           0, /* portid */
+                           0, /* sequence number*/
+                           &_g_genl_family,
+                           0 /* flags */,
+                           AMP_FSM_CMD_REC_HELLO);
+    if (genl_msg == NULL) {
+        amp_log_err("genlmsg_put failed");
+        goto done;
+    }
+
+    (void)genlmsg_end(skb, genl_msg);
+
+    mutex_lock(&_state.portid_mutex);
+    mutex_locked = 1;
+
+    if (_state.nl_portid != 0) {
+        err = GENLMSG_UNICAST(&init_net, skb, _state.nl_portid);
+        /* don't free skb after handing it off to genlmsg_unicast, even if
+           the function returns an error */
+        skb = NULL;
+        /* genlmsg_unicast returns -ECONNREFUSED if there are no listeners, and
+           -EAGAIN if the listener's buffer is full */
+        if (err != 0) {
+            if (err == -ECONNREFUSED) {
+                /* peer disconnected */
+                amp_log_info("peer disconnected");
+                _state.nl_portid = 0;
+            } else if (err == -EAGAIN) {
+                amp_log_info("dropped msg");
+            } else {
+                amp_log_err("genlmsg_unicast failed: %d", err);
+                goto done;
+            }
+        }
+    }
+
+    mutex_unlock(&_state.portid_mutex);
+    mutex_locked = 0;
+done:
+    if (skb) {
+        nlmsg_free(skb);
+        skb = NULL;
+    }
+    if (mutex_locked) {
+        mutex_unlock(&_state.portid_mutex);
+        mutex_locked = 0;
+    }
 }
 
 static inline void __msg_send_task(fileop_data_t *data)
