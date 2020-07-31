@@ -247,7 +247,7 @@ static inline void _msg_send_hello_rec()
 
     genl_msg = GENLMSG_PUT(skb,
                            0, /* portid */
-                           0, /* sequence number, 0 for events */
+                           0, /* sequence number*/
                            &_g_genl_family,
                            0 /* flags */,
                            AMP_FSM_CMD_REC_HELLO);
@@ -293,8 +293,6 @@ done:
         mutex_unlock(&_state.portid_mutex);
         mutex_locked = 0;
     }
-
-    atomic_dec(&_state.num_rec_queued);
 }
 
 static inline void __msg_send_task(fileop_data_t *data)
