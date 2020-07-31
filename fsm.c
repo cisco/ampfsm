@@ -205,7 +205,7 @@ done:
 static int _hello(struct sk_buff *skb, struct genl_info *info)
 {
     (void)_update_portid(info);
-    (void)_msg_send_hello_rec();
+    _msg_send_hello_rec();
     return 0;
 }
 
