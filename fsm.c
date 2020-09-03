@@ -632,14 +632,6 @@ int init_module(void)
 
     mutex_init(&_state.portid_mutex);
 
-    /* initialize work queue */
-    _state.msg_send_wq = create_singlethread_workqueue("csco_amp_msg_wq");
-    if (!_state.msg_send_wq) {
-        amp_log_err("create_singlethread_workqueue(msg_send_wq) failed");
-        ret = -ENOMEM;
-        goto done;
-    }
-
     _state.path_name_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_pathname",
         PATH_MAX, 0 /* align */, 0 /* flags */, NULL /* ctor */);
     if (!_state.path_name_kmem_cache) {
@@ -672,6 +664,14 @@ int init_module(void)
 
     amp_log_info("_g_genl_family.id %u", _g_genl_family.id);
 
+    /* initialize work queue */
+    _state.msg_send_wq = create_singlethread_workqueue("csco_amp_msg_wq");
+    if (!_state.msg_send_wq) {
+        amp_log_err("create_singlethread_workqueue(msg_send_wq) failed");
+        ret = -ENOMEM;
+        goto done;
+    }
+
     /* register filesystem probes */
     err = fcw_init(&cb, AMP_FSM_OP_ALL);
     if (err != 0) {
@@ -702,15 +702,6 @@ void cleanup_module(void)
         _state.is_fcw_init = 0;
     }
 
-    if (_state.is_nl_reg) {
-        /* unregister generic netlink family */
-        err = GENL_UNREGISTER_FAMILY_WITH_OPS(&_g_genl_family, _g_genl_ops);
-        if (err != 0) {
-            amp_log_err("GENL_UNREGISTER_FAMILY_WITH_OPS failed (%d)", err);
-        }
-        _state.is_nl_reg = 0;
-    }
-
     if (_state.msg_send_wq) {
         flush_workqueue(_state.msg_send_wq);
         destroy_workqueue(_state.msg_send_wq);
@@ -720,6 +711,15 @@ void cleanup_module(void)
     num_rec_queued = atomic_read(&_state.num_rec_queued);
     if (num_rec_queued != 0) {
         amp_log_err("num_rec_queued (%d) != 0", num_rec_queued);
+    }
+
+    if (_state.is_nl_reg) {
+        /* unregister generic netlink family */
+        err = GENL_UNREGISTER_FAMILY_WITH_OPS(&_g_genl_family, _g_genl_ops);
+        if (err != 0) {
+            amp_log_err("GENL_UNREGISTER_FAMILY_WITH_OPS failed (%d)", err);
+        }
+        _state.is_nl_reg = 0;
     }
 
     if (_state.path_name_kmem_cache) {
