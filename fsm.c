@@ -132,7 +132,7 @@ static void _msg_send_task(void *param);
 #endif
 
 /**
- * @brief Send an AMP_FSM_CMD_REC_HELLO signal to userland to 
+ * @brief Send an AMP_FSM_CMD_REC_HELLO signal to userland to
  *        signal successful communication link.
  */
 static void _msg_send_hello_rec(void);
@@ -469,13 +469,6 @@ static int _build_path(fileop_data_t *data)
         amp_log_err("Normalized path too big for buffer: %d", n);
         goto done;
     }
-
-    if (path_normalize(data->path, PATH_MAX, norm_path, n) <= 0) {
-        amp_log_err("path_normalize failed: %s (%d)", norm_path, n);
-        goto done;
-    }
-
-    amp_log_debug("Normalized path: %s -> %s", norm_path, data->path);
 
     ret = 0;
 done:
