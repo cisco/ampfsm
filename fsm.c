@@ -37,8 +37,8 @@ static struct {
     struct mutex portid_mutex;
     atomic_t num_rec_queued;
     struct workqueue_struct *msg_send_wq;
-    struct kmem_cache *path_name_kmem_cache;
-    struct kmem_cache *path_normalize_kmem_cache;
+    struct kmem_cache *path_kmem_cache;
+    struct kmem_cache *combined_path_kmem_cache;
     struct kmem_cache *fileop_data_kmem_cache;
     int is_fcw_init; /* Filesystem call watcher initialized? */
     int is_nl_reg; /* Netlink family registered? */
@@ -147,8 +147,7 @@ static void _msg_send_hello_rec(void);
 static void _op_cb(fileop_data_t *data);
 
 /**
- * @brief Join the struct path file path to the fileop file path and normalize
- *        the resulting path.
+ * @brief Construct a path from the base path (data->pwd) and the file path from the rename system call.
  *
  * @param[in] data - fileop pointer
  *
@@ -432,56 +431,54 @@ static void _op_cb(fileop_data_t *data)
     data = NULL;
 }
 
+static int _prepend(char *str1, size_t str1_size, const char *str2)
+{
+    int ret = -1;
+    size_t str1_len = strlen(str1);
+    size_t str2_len = strlen(str2);
+    if (str1_len + str2_len + 1 < str1_size) {
+        /* dest: +1 to allow room for a '/'
+           size: +1 to cover the terminating '\0' */
+        memmove(str1 + str2_len + 1, str1, str1_len + 1);
+        memcpy(str1, str2, str2_len);
+        str1[str2_len] = '/';
+        ret = 0;
+    }
+    return ret;
+}
+
 static int _build_path(fileop_data_t *data)
 {
     int ret = -1;
-    int n;
-    char *cur_path = NULL;
-    char *cur_ptr;
-    char *norm_path = NULL;
+    char *pwd_path = NULL;
+    char *pwd_ptr;
 
-    cur_path = kmem_cache_alloc(_state.path_name_kmem_cache, GFP_KERNEL);
-    if (!cur_path) {
-        amp_log_err("kmem_cache_alloc(path_name) failed");
-        goto done;
-    }
-
-    norm_path = kmem_cache_alloc(_state.path_normalize_kmem_cache, GFP_KERNEL);
-    if (!norm_path) {
-        amp_log_err("kmem_cache_alloc(path_normalize) failed");
+    pwd_path = kmem_cache_alloc(_state.path_kmem_cache, GFP_KERNEL);
+    if (!pwd_path) {
+        amp_log_err("kmem_cache_alloc(path_kmem_cache) failed");
         goto done;
     }
 
     /* d_path may sleep */
-    cur_ptr = d_path(&data->pwd, cur_path, PATH_MAX);
-    if (!cur_ptr || (cur_ptr && IS_ERR(cur_ptr))) {
+    pwd_ptr = d_path(&data->pwd, pwd_path, PATH_MAX);
+    if (!pwd_ptr || (pwd_ptr && IS_ERR(pwd_ptr))) {
         amp_log_err("d_path failed");
         goto done;
     }
 
-    n = snprintf(norm_path, PATH_MAX*2, "%s/%s", cur_ptr, data->path);
-    if (n < 0) {
-        amp_log_err("snprintf failed: %d", n);
-        goto done;
-    }
-
-    if (n >= PATH_MAX*2) {
-        amp_log_err("Normalized path too big for buffer: %d", n);
+    if (_prepend(data->path, PATH_MAX*2, pwd_ptr)) {
+        amp_log_err("_prepend failed");
         goto done;
     }
 
     ret = 0;
 done:
-    if (cur_path) {
-        kmem_cache_free(_state.path_name_kmem_cache, cur_path);
-        cur_path = NULL;
-        cur_ptr = NULL;
+    if (pwd_path) {
+        kmem_cache_free(_state.path_kmem_cache, pwd_path);
+        pwd_path = NULL;
+        pwd_ptr = NULL;
     }
 
-    if (norm_path) {
-        kmem_cache_free(_state.path_normalize_kmem_cache, norm_path);
-        norm_path = NULL;
-    }
     /* path_put may sleep */
     path_put(&data->pwd);
 
@@ -515,7 +512,7 @@ fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filenam
         goto done;
     }
 
-    data->path = kmem_cache_alloc(_state.path_name_kmem_cache, GFP_ATOMIC);
+    data->path = kmem_cache_alloc(_state.combined_path_kmem_cache, GFP_ATOMIC);
     if (!data->path) {
         amp_log_err("kmem_cache_alloc(path_name) failed");
         fileop_free(data);
@@ -603,7 +600,7 @@ void fileop_free(fileop_data_t *data)
 {
     if (data) {
         if (data->path) {
-            kmem_cache_free(_state.path_name_kmem_cache, data->path);
+            kmem_cache_free(_state.combined_path_kmem_cache, data->path);
             data->path = NULL;
         }
 
@@ -625,16 +622,16 @@ int init_module(void)
 
     mutex_init(&_state.portid_mutex);
 
-    _state.path_name_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_pathname",
+    _state.path_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_path",
         PATH_MAX, 0 /* align */, 0 /* flags */, NULL /* ctor */);
-    if (!_state.path_name_kmem_cache) {
+    if (!_state.path_kmem_cache) {
         ret = -ENOMEM;
         goto done;
     }
 
-    _state.path_normalize_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_pathnorm",
+    _state.combined_path_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_combined_path",
         PATH_MAX*2, 0 /* align */, 0 /* flags */, NULL /* ctor */);
-    if (!_state.path_normalize_kmem_cache) {
+    if (!_state.combined_path_kmem_cache) {
         ret = -ENOMEM;
         goto done;
     }
@@ -715,14 +712,14 @@ void cleanup_module(void)
         _state.is_nl_reg = 0;
     }
 
-    if (_state.path_name_kmem_cache) {
-        kmem_cache_destroy(_state.path_name_kmem_cache);
-        _state.path_name_kmem_cache = NULL;
+    if (_state.path_kmem_cache) {
+        kmem_cache_destroy(_state.path_kmem_cache);
+        _state.path_kmem_cache = NULL;
     }
 
-    if (_state.path_normalize_kmem_cache) {
-        kmem_cache_destroy(_state.path_normalize_kmem_cache);
-        _state.path_normalize_kmem_cache = NULL;
+    if (_state.combined_path_kmem_cache) {
+        kmem_cache_destroy(_state.combined_path_kmem_cache);
+        _state.combined_path_kmem_cache = NULL;
     }
 
     if (_state.fileop_data_kmem_cache) {
