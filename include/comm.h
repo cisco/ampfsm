@@ -27,6 +27,8 @@ enum {
     AMP_FSM_CMD_REC_HELLO, /* Kernels response to userland hello message */
 };
 
+#define AMP_FSM_PATH_MAX (PATH_MAX * 2)
+
 /* generic netlink - attributes */
 enum {
     AMP_FSM_ATTR_UNSPEC,

@@ -466,7 +466,7 @@ static int _build_path(fileop_data_t *data)
         goto done;
     }
 
-    if (_prepend(data->path, PATH_MAX*2, pwd_ptr)) {
+    if (_prepend(data->path, AMP_FSM_PATH_MAX, pwd_ptr)) {
         amp_log_err("_prepend failed");
         goto done;
     }
@@ -630,7 +630,7 @@ int init_module(void)
     }
 
     _state.combined_path_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_combined_path",
-        PATH_MAX*2, 0 /* align */, 0 /* flags */, NULL /* ctor */);
+        AMP_FSM_PATH_MAX, 0 /* align */, 0 /* flags */, NULL /* ctor */);
     if (!_state.combined_path_kmem_cache) {
         ret = -ENOMEM;
         goto done;
