@@ -7,7 +7,6 @@
 #include "amp_log.h"
 #include "fsm.h"
 #include "fscallwatch.h"
-#include "utils.h"
 #include "include/comm.h"
 
 #include <linux/module.h>
