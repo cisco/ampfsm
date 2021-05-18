@@ -554,13 +554,12 @@ int fcw_init(fcw_cb_t *cb, amp_fsm_op_t filter)
         amp_log_debug("[probe:%s] registered kretprobe", probe->k.probe.kp.symbol_name);
         num_probes_registered++;
 
-        /* If renameat2 exists, renameat and rename are implemented by calling
-         * sys_renameat2.
-         * If renameat exists but not renameat2, rename is implemented by
-         * calling sys_renameat.
-         * Therefore, we only need to probe a single function.
+        /* on RHEL, renameat and rename are implemented by calling sys_renameat2.
+         * Therefore, we only need to probe a single function on RHEL.
          */
+#if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 1)
         break;
+#endif
     }
 
     if (num_probes_registered == 0) {
