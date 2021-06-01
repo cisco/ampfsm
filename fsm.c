@@ -21,11 +21,6 @@
 #include <net/genetlink.h>
 #include <linux/fdtable.h>
 
-/* Stringification macros */
-
-#define STR(s)  #s
-#define XSTR(s) STR(s)
-
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Russ Kubik <rkubik@cisco.com>");
 MODULE_AUTHOR("Craig Davison <crdaviso@cisco.com>");
@@ -40,7 +35,7 @@ MODULE_AUTHOR("Craig Davison <crdaviso@cisco.com>");
     MODULE_DESCRIPTION("Cisco AMP Filesystem Module");
 #else
 #ifdef AMP_CUSTOM_KMOD
-    MODULE_DESCRIPTION("Cisco AMP Filesystem Module (user-built) " XSTR(AMP_CUSTOM_KMOD));
+    MODULE_DESCRIPTION("Cisco AMP Filesystem Module (user-built) " AMP_CUSTOM_KMOD);
 #else
     MODULE_DESCRIPTION("Cisco AMP Filesystem Module (user-built)");
 #endif
