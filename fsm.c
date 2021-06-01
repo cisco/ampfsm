@@ -21,10 +21,30 @@
 #include <net/genetlink.h>
 #include <linux/fdtable.h>
 
+/* Stringification macros */
+
+#define STR(s)  #s
+#define XSTR(s) STR(s)
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Russ Kubik <rkubik@cisco.com>");
 MODULE_AUTHOR("Craig Davison <crdaviso@cisco.com>");
-MODULE_DESCRIPTION("Cisco AMP Filesystem Module");
+
+/**
+ * AMP_RELEASE_KMOD is defined if the kernel module is compiled in an
+ * official Connector release.
+ * AMP_CUSTOM_KMOD is defined if the kernel module is compiled by a user.
+ * It contains a custom identifier for the kernel module.
+ */
+#ifdef AMP_RELEASE_KMOD
+    MODULE_DESCRIPTION("Cisco AMP Filesystem Module");
+#else
+#ifdef AMP_CUSTOM_KMOD
+    MODULE_DESCRIPTION("Cisco AMP Filesystem Module (user-built) " XSTR(AMP_CUSTOM_KMOD));
+#else
+    MODULE_DESCRIPTION("Cisco AMP Filesystem Module (user-built)");
+#endif
+#endif
 
 static struct {
     /* nl_portid - only send messages to this peer, and do not send at all if
