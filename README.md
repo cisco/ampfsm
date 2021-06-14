@@ -12,7 +12,7 @@ events to user space.
 ### Supported kernels
 
 This module has been tested on kernels 3.10 (as distributed in CentOS 7) through
-4.13 (as distributed in Ubuntu 17.10). This module requires jprobes, so kernel
+4.14 (as distributed in Amazon Linux 2). This module requires jprobes, so kernel
 version 4.15 and higher are not currently supported.
 
 ### Build the module
