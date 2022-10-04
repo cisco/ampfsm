@@ -669,9 +669,10 @@ int init_module(void)
     amp_log_info("_g_genl_family.id %u", _g_genl_family.id);
 
     /* initialize work queue */
-    _state.msg_send_wq = create_singlethread_workqueue("csco_amp_msg_wq");
+    _state.msg_send_wq = alloc_workqueue("csco_amp_msg_wq", WQ_MEM_RECLAIM, 0);
+
     if (!_state.msg_send_wq) {
-        amp_log_err("create_singlethread_workqueue(msg_send_wq) failed");
+        amp_log_err("alloc_workqueue(msg_send_wq) failed");
         ret = -ENOMEM;
         goto done;
     }
