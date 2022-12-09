@@ -52,7 +52,6 @@ static struct {
     atomic_t num_rec_queued;
     struct workqueue_struct *msg_send_wq;
     struct kmem_cache *path_kmem_cache;
-    struct kmem_cache *combined_path_kmem_cache;
     struct kmem_cache *fileop_data_kmem_cache;
     int is_fcw_init; /* Filesystem call watcher initialized? */
     int is_nl_reg; /* Netlink family registered? */
@@ -163,11 +162,14 @@ static void _op_cb(fileop_data_t *data);
 /**
  * @brief Construct a path from the base path (data->pwd) and the file path from the rename system call.
  *
- * @param[in] data - fileop pointer
+ * @param[out] buf - buffer to write the output path to
+ * @param[in] buf_size - size of output buffer
+ * @param[in] pwd - working directory
+ * @param[in] op_path - file path supplied for the operation
  *
  * @return 0 on success, -1 on error
  */
-static int _build_path(fileop_data_t *data);
+static int _build_path(char* buf, size_t buf_size, const struct path * pwd, const char * op_path);
 
 static struct genl_ops _g_genl_ops[] = {
     {
@@ -248,7 +250,6 @@ done:
 static inline void _msg_send_hello_rec()
 {
     int err;
-    int mutex_locked = 0;
     struct sk_buff *skb = NULL;
     void *genl_msg;
 
@@ -272,7 +273,6 @@ static inline void _msg_send_hello_rec()
     (void)genlmsg_end(skb, genl_msg);
 
     mutex_lock(&_state.portid_mutex);
-    mutex_locked = 1;
 
     if (_state.nl_portid != 0) {
         err = GENLMSG_UNICAST(&init_net, skb, _state.nl_portid);
@@ -290,35 +290,57 @@ static inline void _msg_send_hello_rec()
                 amp_log_info("dropped msg");
             } else {
                 amp_log_err("genlmsg_unicast failed: %d", err);
-                goto done;
             }
         }
     }
 
     mutex_unlock(&_state.portid_mutex);
-    mutex_locked = 0;
 done:
     if (skb) {
         nlmsg_free(skb);
         skb = NULL;
     }
-    if (mutex_locked) {
-        mutex_unlock(&_state.portid_mutex);
-        mutex_locked = 0;
-    }
 }
 
 static inline void __msg_send_task(fileop_data_t *data)
 {
+    int data_pwd_valid = 1;
     int err;
-    int mutex_locked = 0;
     struct sk_buff *skb = NULL;
     void *genl_msg;
+    amp_fsm_op_t op;
+    pid_t pid;
+    pid_t ppid;
+    uid_t uid;
 
-    if (_build_path(data) != 0) {
+    /* Combined path is the working directory combined with the operation's
+     * specified file path */
+    char *combined_path = kmem_cache_alloc(_state.path_kmem_cache, GFP_KERNEL);
+    if (!combined_path) {
+        amp_log_err("kmem_cache_alloc(path_kmem_cache) failed");
+        goto done;
+    }
+
+    err = _build_path(combined_path, PATH_MAX, &data->pwd, data->path);
+
+    /* path_put may sleep */
+    path_put(&data->pwd);
+    data_pwd_valid = 0;
+
+    if (err) {
         amp_log_err("_build_path failed, dropping...");
         goto done;
     }
+
+    /* Copy information from input fileop to local variables to expedite
+     * freeing allocated memory */
+    op = data->op;
+    uid = data->uid;
+    pid = data->pid;
+    ppid = data->ppid;
+
+    fileop_free(data);
+    data = NULL;
 
     skb = alloc_skb(SKB_MAX_ALLOC, GFP_KERNEL);
     if (!skb) {
@@ -337,42 +359,42 @@ static inline void __msg_send_task(fileop_data_t *data)
         goto done;
     }
 
-    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_OP, data->op);
+    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_OP, op);
     if (err != 0) {
         amp_log_err("nla_put_u8(op) failed");
         goto done;
     }
 
-    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_UID, data->uid);
+    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_UID, uid);
     if (err != 0) {
         amp_log_err("nla_put_u32(uid) failed");
         goto done;
     }
 
-    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_PID, data->pid);
+    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_PID, pid);
     if (err != 0) {
         amp_log_err("nla_put_u32(pid) failed");
         goto done;
     }
 
-    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_PPID, data->ppid);
+    err = nla_put_u32(skb, AMP_FSM_ATTR_REC_PPID, ppid);
     if (err != 0) {
         amp_log_err("nla_put_u32(ppid) failed");
         goto done;
     }
 
-    if (data->path) {
-        err = nla_put_string(skb, AMP_FSM_ATTR_REC_PATH, data->path);
-        if (err != 0) {
-            amp_log_err("nla_put_string(path) failed");
-            goto done;
-        }
+    err = nla_put_string(skb, AMP_FSM_ATTR_REC_PATH, combined_path);
+    if (err != 0) {
+        amp_log_err("nla_put_string(path) failed");
+        goto done;
     }
 
     (void)genlmsg_end(skb, genl_msg);
 
+    kmem_cache_free(_state.path_kmem_cache, combined_path);
+    combined_path = NULL;
+
     mutex_lock(&_state.portid_mutex);
-    mutex_locked = 1;
 
     if (_state.nl_portid != 0) {
         err = GENLMSG_UNICAST(&init_net, skb, _state.nl_portid);
@@ -390,21 +412,24 @@ static inline void __msg_send_task(fileop_data_t *data)
                 amp_log_info("dropped msg");
             } else {
                 amp_log_err("genlmsg_unicast failed: %d", err);
-                goto done;
             }
         }
     }
 
     mutex_unlock(&_state.portid_mutex);
-    mutex_locked = 0;
+
 done:
     if (skb) {
         nlmsg_free(skb);
         skb = NULL;
     }
-    if (mutex_locked) {
-        mutex_unlock(&_state.portid_mutex);
-        mutex_locked = 0;
+    if (combined_path) {
+        kmem_cache_free(_state.path_kmem_cache, combined_path);
+        combined_path = NULL;
+    }
+    if (data_pwd_valid) {
+        path_put(&data->pwd);
+        data_pwd_valid = 0;
     }
     fileop_free(data);
     data = NULL;
@@ -445,65 +470,77 @@ static void _op_cb(fileop_data_t *data)
     data = NULL;
 }
 
-static int _prepend(char *str1, size_t str1_size, const char *str2)
+static int _build_path(char* buf, size_t buf_size, const struct path * pwd, const char * op_path)
 {
     int ret = -1;
-    size_t str1_len = strlen(str1);
-    size_t str2_len = strlen(str2);
-    if (str1_len + str2_len + 1 < str1_size) {
-        /* dest: +1 to allow room for a '/'
-           size: +1 to cover the terminating '\0' */
-        memmove(str1 + str2_len + 1, str1, str1_len + 1);
-        memcpy(str1, str2, str2_len);
-        str1[str2_len] = '/';
-        ret = 0;
-    }
-    return ret;
-}
-
-static int _build_path(fileop_data_t *data)
-{
-    int ret = -1;
-    char *pwd_path = NULL;
-    char *pwd_ptr;
-
-    pwd_path = kmem_cache_alloc(_state.path_kmem_cache, GFP_KERNEL);
-    if (!pwd_path) {
-        amp_log_err("kmem_cache_alloc(path_kmem_cache) failed");
-        goto done;
-    }
+    char *pwd_ptr = NULL;
+    size_t pwd_len = 0;
+    size_t op_path_len = 0;
 
     /* d_path may sleep */
-    pwd_ptr = d_path(&data->pwd, pwd_path, PATH_MAX);
+    pwd_ptr = d_path(pwd, buf, buf_size);
     if (!pwd_ptr || (pwd_ptr && IS_ERR(pwd_ptr))) {
         amp_log_err("d_path failed");
         goto done;
     }
 
-    if (_prepend(data->path, AMP_FSM_PATH_MAX, pwd_ptr)) {
-        amp_log_err("_prepend failed");
-        goto done;
-    }
+    pwd_len = strlen(pwd_ptr);
+    op_path_len = strlen(op_path);
 
-    ret = 0;
+    if ((pwd_len + 1 + op_path_len) < buf_size) {
+        char *b = buf;
+
+        if (pwd_len > 0) {
+            /* d_path does not guarantee placing the result at the beginning
+             * of the buffer. If necessary, move the working directory
+             * to the start so the full buffer can be used. */
+            if (pwd_ptr != buf) {
+                memmove(buf, pwd_ptr, pwd_len);
+            }
+
+            /* The working directory may have a trailing slash and the
+             * operation path may have a leading slash. Avoid duplicating
+             * slashes in those cases. If neither string can contribute a
+             * delimiter slash then add one. */
+            b += pwd_len - 1;
+            if (*b == '/') {
+                if (*op_path != '/') {
+                    b += 1;
+                }
+            } else {
+                if (*op_path != '/') {
+                    b += 1;
+                    *b++ = '/';
+                }
+            }
+        }
+
+        /* Append the operation file path including null terminator. */
+        memcpy(b, op_path, op_path_len + 1);
+
+        ret = 0;
+    }
 done:
-    if (pwd_path) {
-        kmem_cache_free(_state.path_kmem_cache, pwd_path);
-        pwd_path = NULL;
-        pwd_ptr = NULL;
-    }
-
-    /* path_put may sleep */
-    path_put(&data->pwd);
-
     return ret;
 }
 
 fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filename)
 {
+    /* Allocate memory with GFP_NOWAIT to accomodate when preemption is
+     * disabled such as in probe handlers. Prefer GFP_NOWAIT over GFP_ATOMIC
+     * as occasional allocation failure is acceptable and avoids stressing the
+     * kernel. Suppress allocation failure warnings in release mode. */
+#ifdef AMP_DEBUG
+    const gfp_t gfp_flags = GFP_NOWAIT;
+#else
+    const gfp_t gfp_flags = GFP_NOWAIT | __GFP_NOWARN;
+#endif
+
     char comm[TASK_COMM_LEN] = { 0 };
     fileop_data_t *data = NULL;
+    size_t path_buf_sz = 0;
     long err;
+    int success = 0;
 
     if (!filename) {
         amp_log_info("Null filename given");
@@ -520,21 +557,26 @@ fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filenam
         }
     }
 
-    data = kmem_cache_alloc(_state.fileop_data_kmem_cache, GFP_ATOMIC);
+    data = kmem_cache_alloc(_state.fileop_data_kmem_cache, gfp_flags);
     if (!data) {
         amp_log_err("kmem_cache_alloc(fileop_data) failed");
         goto done;
     }
 
-    data->path = kmem_cache_alloc(_state.combined_path_kmem_cache, GFP_ATOMIC);
-    if (!data->path) {
-        amp_log_err("kmem_cache_alloc(path_name) failed");
-        fileop_free(data);
-        data = NULL;
-        goto done;
-    }
+    /* Allocate memory to copy the "filename" string. Since this function is
+     * callable from a probe handler, we avoid calling strnlen_user which can
+     * sleep. This presents the challenge of allocating a right-sized buffer
+     * before copying.
+     *
+     * Large memory allocations with GFP_NOWAIT are more likely to fail. To
+     * reduce the probabiity of failure, use small buffer optimization on the
+     * assumption most file operation paths are much shorter than PATH_MAX.
+     * A separate allocation is only needed when the path is long. */
+    data->path = data->path_buffer.storage.small_buf;
+    data->path_buffer.capacity = 0;
+    path_buf_sz = sizeof(data->path_buffer.storage.small_buf);
 
-    err = strncpy_from_user(data->path, filename, PATH_MAX);
+    err = strncpy_from_user(data->path, filename, path_buf_sz);
     if (err < 0) {
         /* The only failure case where having the current task's comm and tgid is
          * valuable. EFAULT is expected as the userland process can pass any pointer
@@ -546,19 +588,52 @@ fileop_data_t *fileop_new(amp_fsm_op_t op, int dirfd, const char __user *filenam
             amp_log_err("strncpy_from_user failed (comm: %s, pid: %d): %ld",
                         get_task_comm(comm, current), task_tgid_nr(current), err);
         }
-        fileop_free(data);
-        data = NULL;
         goto done;
+    } else if (err >= path_buf_sz) {
+        /* Path is longer than can be stored in small buffer. Allocate a larger
+         * buffer from kernel cache. */
+        data->path_buffer.storage.large_buf = kmem_cache_alloc(_state.path_kmem_cache, gfp_flags);
+        if (!data->path_buffer.storage.large_buf) {
+            amp_log_err("kmem_cache_alloc(path_name) failed");
+            goto done;
+        }
+
+        data->path = data->path_buffer.storage.large_buf;
+        data->path_buffer.capacity = PATH_MAX;
+        path_buf_sz = PATH_MAX;
+
+        err = strncpy_from_user(data->path, filename, path_buf_sz);
+        if (err < 0) {
+            if (err == -EFAULT) {
+                amp_log_info("strncpy_from_user 2 access to userspace failed (comm: %s, pid: %d)",
+                            get_task_comm(comm, current), task_tgid_nr(current));
+            } else {
+                amp_log_err("strncpy_from_user 2 failed (comm: %s, pid: %d): %ld",
+                            get_task_comm(comm, current), task_tgid_nr(current), err);
+            }
+            goto done;
+        } else if (err >= path_buf_sz) {
+            amp_log_err("strncpy_from_user 2; path too long (comm: %s, pid: %d)",
+                        get_task_comm(comm, current), task_tgid_nr(current));
+            goto done;
+        }
     }
 
-    data->path[PATH_MAX-1] = '\0';
+    data->path[path_buf_sz - 1] = '\0';
     data->pid = task_tgid_nr(current);
     data->ppid = TASK_PPID_NR(current);
     data->uid = TASK_UID(current);
     data->op = op;
     data->dirfd = dirfd;
 
+    success = 1;
+
 done:
+    if (!success) {
+        fileop_free(data);
+        data = NULL;
+    }
+
     return data;
 }
 
@@ -613,10 +688,11 @@ done:
 void fileop_free(fileop_data_t *data)
 {
     if (data) {
-        if (data->path) {
-            kmem_cache_free(_state.combined_path_kmem_cache, data->path);
-            data->path = NULL;
+        if (data->path_buffer.capacity > 0) {
+            kmem_cache_free(_state.path_kmem_cache, data->path_buffer.storage.large_buf);
+            data->path_buffer.storage.large_buf = NULL;
         }
+        data->path = NULL;
 
         kmem_cache_free(_state.fileop_data_kmem_cache, data);
         data = NULL;
@@ -639,13 +715,6 @@ int init_module(void)
     _state.path_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_path",
         PATH_MAX, 0 /* align */, 0 /* flags */, NULL /* ctor */);
     if (!_state.path_kmem_cache) {
-        ret = -ENOMEM;
-        goto done;
-    }
-
-    _state.combined_path_kmem_cache = KMEM_CACHE_CREATE("csco_amp_fcw_combined_path",
-        AMP_FSM_PATH_MAX, 0 /* align */, 0 /* flags */, NULL /* ctor */);
-    if (!_state.combined_path_kmem_cache) {
         ret = -ENOMEM;
         goto done;
     }
@@ -730,11 +799,6 @@ void cleanup_module(void)
     if (_state.path_kmem_cache) {
         kmem_cache_destroy(_state.path_kmem_cache);
         _state.path_kmem_cache = NULL;
-    }
-
-    if (_state.combined_path_kmem_cache) {
-        kmem_cache_destroy(_state.combined_path_kmem_cache);
-        _state.combined_path_kmem_cache = NULL;
     }
 
     if (_state.fileop_data_kmem_cache) {

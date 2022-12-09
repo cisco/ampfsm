@@ -8,6 +8,25 @@
 
 #include "include/comm.h"
 
+/* Buffer to store a path string; uses small buffer optimization.
+ * The small buffer size is set to a value that keep the structure
+ * compact (i.e., much smaller than one page) but still have give
+ * decent chance for the optimization to be valuable. The current
+ * setting intends to keep the size of fileop_path_buffer_t
+ * to less than 256 bytes.*/
+#define FILEOP_PATH_SMALL_BUF_SIZE (128)
+typedef struct fileop_path_buffer {
+    union {
+        char small_buf[FILEOP_PATH_SMALL_BUF_SIZE];
+        char *large_buf;
+    } storage;
+
+    /* Size of allocated buffer:
+     *   If greater-than-zero, storage was allocated and large_buf is in use.
+     *   If zero, storage was not allocatedd and small_buf is in use. */
+    size_t capacity;
+} fileop_path_buffer_t;
+
 /* File operation information */
 typedef struct {
     /* Kernel */
@@ -20,6 +39,7 @@ typedef struct {
     pid_t pid;
     pid_t ppid;
     uid_t uid;
+    fileop_path_buffer_t path_buffer;
 } fileop_data_t;
 
 /**
