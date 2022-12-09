@@ -22,8 +22,9 @@
 #include <linux/fdtable.h>
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Russ Kubik <rkubik@cisco.com>");
-MODULE_AUTHOR("Craig Davison <crdaviso@cisco.com>");
+MODULE_AUTHOR("Russ Kubik");
+MODULE_AUTHOR("Craig Davison");
+MODULE_AUTHOR("Cisco <tac@cisco.com>");
 
 /**
  * AMP_RELEASE_KMOD is defined if the kernel module is compiled in an

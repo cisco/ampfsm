@@ -1,8 +1,8 @@
 ### Cisco AMP Filesystem Module (ampfsm.ko)
 
-Russ Kubik <rkubik@cisco.com>
+Russ Kubik
 
-Craig Davison <crdaviso@cisco.com>
+Craig Davison
 
 ### Description
 
